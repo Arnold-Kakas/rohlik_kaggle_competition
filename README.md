@@ -48,21 +48,16 @@ This project requires the following R packages:
 - `tidymodels`
 - `lubridate`
 - `timetk`
-- `dplyr`
 - `ggplot2`
 
 You can install these packages using the following commands:
-
-```R
-install.packages(c("tidyverse", "modeltime", "tidymodels", "lubridate", "timetk", "dplyr", "ggplot2"))
-```
 
 ## Usage
 
 1. Clone the repository:
    ```sh
-   git clone https://github.com/yourusername/rohlik-forecasting.git
-   cd rohlik-forecasting
+   git clone https://github.com/yourusername/rohlik-kaggle_competition.git
+   cd rohlik-kaggle_competition
    ```
 
 2. Open the R project in RStudio.
