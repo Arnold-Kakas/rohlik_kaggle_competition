@@ -11,7 +11,14 @@ The goal of this project is to forecast the daily orders of Rohlik.cz for the ne
 
 ## Dataset
 
-The dataset used for this project includes historical daily order data provided by Rohlik.cz. This data will be preprocessed and used to train various forecasting models.
+The dataset used for this project includes historical daily order data provided by Rohlik.cz.
+
+There are 5 files provided:
+   1. train.csv - the training set containing the historical orders data and selected features described below
+   2. test.csv - the test set
+   3. solution_example.csv - a sample submission file in the correct format
+   4. train_calendar.csv - a calendar for the training set containing data about holidays or warehouse specific events, some columns are already in the train data but there are additional rows in this file for dates where some warehouses could be closed due to public holiday or Sunday (and therefore they are not in the train set)
+   5. test_calendar.csv - a calendar for the test set
 
 ## Methodology
 
