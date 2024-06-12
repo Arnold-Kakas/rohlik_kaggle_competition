@@ -3,7 +3,7 @@
 
 This repository contains the code and documentation for forecasting daily orders for Rohlik.cz using the `modeltime` framework. This project is a submission for the Kaggle forecasting competition hosted by Rohlik.cz.
 
-More details regarding the competition can be found (here)[https://www.kaggle.com/competitions/rohlik-orders-forecasting-challenge]
+More details regarding the competition can be found [here](https://www.kaggle.com/competitions/rohlik-orders-forecasting-challenge)
 
 ## Project Overview
 
