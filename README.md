@@ -50,44 +50,9 @@ This project requires the following R packages:
 - `timetk`
 - `ggplot2`
 
-You can install these packages using the following commands:
-
-## Usage
-
-1. Clone the repository:
-   ```sh
-   git clone https://github.com/yourusername/rohlik-kaggle_competition.git
-   cd rohlik-kaggle_competition
-   ```
-
-2. Open the R project in RStudio.
-
-3. Run the preprocessing script to clean and transform the data:
-   ```R
-   source("scripts/preprocessing.R")
-   ```
-
-4. Train the models and generate forecasts:
-   ```R
-   source("scripts/modeling.R")
-   ```
-
-5. Evaluate the models and visualize the results:
-   ```R
-   source("scripts/evaluation.R")
-   ```
-
-## Results
-
-The final model ensemble achieved [mention your results here, e.g., RMSE, MAE, MAPE] on the validation set. Detailed results and visualizations can be found in the `results` directory.
-
-## Contributing
-
-Contributions are welcome! Please open an issue or submit a pull request for any improvements or bug fixes.
-
 ## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+This project is licensed under the GPL-3.0 License. See the `LICENSE` file for details.
 
 ## Acknowledgements
 
@@ -96,4 +61,4 @@ This project is licensed under the MIT License. See the `LICENSE` file for detai
 
 ## Contact
 
-For any questions or feedback, please contact [your name] at [your email].
+For any questions or feedback, please contact me at kakas@cleandata.sk.
