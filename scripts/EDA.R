@@ -20,7 +20,7 @@ full_time_series <- calendar |>
   select(warehouse, date) |> 
   distinct()
 
-summarize(calendar_test,
+summarize(calendar_train,
           .by = warehouse,
           min_date = min(date),
           max_date = max(date))
@@ -85,5 +85,62 @@ expanded_data |>
   tk_augment_timeseries_signature() |> 
   colnames()
 
-# we will remove  "hour", "minute", "second", "hour12", "am.pm", "index.num"
+# we will remove  "hour", "minute", "second", "hour12", "am.pm", "index.num" in recipe
 
+
+# anomaly detection
+
+expanded_data |> 
+  filter(warehouse == "Munich_1",
+         date >= ymd("2022-02-01"),
+         date <= ymd("2024-03-15")) |> 
+  timetk::anomalize(.date_var = date,
+                    .value = orders,
+                    .iqr_alpha = 0.1,
+                    .max_anomalies = 0.2) |>
+  timetk::plot_anomalies(.date_var = date, .interactive = FALSE) +
+  theme_minimal() +
+  labs(title = NULL) +
+  theme(legend.position = "none")
+
+# spravit cleaning pre munich a frankfurt zlvast len pre ich periody, odstanit test casovy rad a skratit zaciatok podla first order
+
+expanded_data_cleaned <- expanded_data |> 
+  group_by(warehouse) |> 
+  anomalize(
+    .date_var      = date, 
+    .value         = orders,
+    .iqr_alpha     = 0.1,
+    .message       = FALSE
+  ) |> 
+  select(warehouse,
+         date,
+         orders = observed_clean) |> 
+  mutate(orders = round(orders, 0))
+
+expanded_data_cleaned <- expanded_data_cleaned |> 
+  left_join(expanded_data |> 
+              select(warehouse,
+                     date,
+                     holiday_name,
+                     holiday,
+                     shops_closed,
+                     winter_school_holidays,
+                     school_holidays),
+            join_by(warehouse == warehouse, date == date),
+            keep = FALSE)
+
+
+expanded_data_cleaned |>
+  filter(warehouse == "Frankfurt_1",
+         date <= ymd("2024-03-15")) |> 
+  select(date, orders) |> 
+  plot_time_series(
+    .date_var = date,
+    .value = orders,
+    .smooth = FALSE,
+    .interactive = FALSE
+  )
+
+write_rds(expanded_data, "data/full_data.RDS")
+write_rds(expanded_data_cleaned, "data/full_data_cleaned.RDS")
