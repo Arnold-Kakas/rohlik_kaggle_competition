@@ -57,8 +57,8 @@ expanded_data <- expanded_data %>%
   ) |> 
   ungroup()
 
-expanded_data |>
-  filter(warehouse == "Prague_1",
+rohlik_all |>
+  filter(warehouse == "Frankfurt_1",
          date <= ymd("2024-03-15")) |> 
   select(date, orders) |> 
   plot_time_series(
@@ -90,13 +90,13 @@ expanded_data |>
 
 # anomaly detection
 
-expanded_data |> 
-  filter(warehouse == "Munich_1",
+rohlik_all |> 
+  filter(warehouse == "Prague_3",
          date >= ymd("2022-02-01"),
          date <= ymd("2024-03-15")) |> 
   timetk::anomalize(.date_var = date,
                     .value = orders,
-                    .iqr_alpha = 0.1,
+                    .iqr_alpha = 0.10,
                     .max_anomalies = 0.2) |>
   timetk::plot_anomalies(.date_var = date, .interactive = FALSE) +
   theme_minimal() +
@@ -105,12 +105,15 @@ expanded_data |>
 
 # spravit cleaning pre munich a frankfurt zlvast len pre ich periody, odstanit test casovy rad a skratit zaciatok podla first order
 
-expanded_data_cleaned <- expanded_data |> 
+expanded_data_cleaned_munich <- rohlik_all |> 
+  filter(warehouse == "Munich_1",
+         date >= ymd("2021-07-21"),
+         date <= ymd("2024-03-15")) |> 
   group_by(warehouse) |> 
   anomalize(
     .date_var      = date, 
     .value         = orders,
-    .iqr_alpha     = 0.1,
+    .iqr_alpha     = 0.15,
     .message       = FALSE
   ) |> 
   select(warehouse,
@@ -118,8 +121,45 @@ expanded_data_cleaned <- expanded_data |>
          orders = observed_clean) |> 
   mutate(orders = round(orders, 0))
 
+expanded_data_cleaned_frankfurt <- rohlik_all |> 
+  filter(warehouse == "Frankfurt_1",
+         date >= ymd("2022-02-18"),
+         date <= ymd("2024-03-15")) |> 
+  group_by(warehouse) |> 
+  anomalize(
+    .date_var      = date, 
+    .value         = orders,
+    .iqr_alpha     = 0.15,
+    .message       = FALSE
+  ) |> 
+  select(warehouse,
+         date,
+         orders = observed_clean) |> 
+  mutate(orders = round(orders, 0))
+
+expanded_data_cleaned_rest <- rohlik_all |> 
+  filter(warehouse %in% c("Prague_1", "Prague_2", "Prague_3", "Budapest_1", "Brno_1"),
+         date <= ymd("2024-03-15")) |> 
+  group_by(warehouse) |> 
+  anomalize(
+    .date_var      = date, 
+    .value         = orders,
+    .iqr_alpha     = 0.15,
+    .message       = FALSE
+  ) |> 
+  select(warehouse,
+         date,
+         orders = observed_clean) |> 
+  mutate(orders = round(orders, 0))
+
+expanded_data_cleaned <- bind_rows(
+  expanded_data_cleaned_frankfurt,
+  expanded_data_cleaned_munich,
+  expanded_data_cleaned_rest
+)
+
 expanded_data_cleaned <- expanded_data_cleaned |> 
-  left_join(expanded_data |> 
+  left_join(rohlik_all |> 
               select(warehouse,
                      date,
                      holiday_name,
