@@ -4,17 +4,24 @@ library(tidymodels)
 library(modeltime)
 library(modeltime.resample)
 library(timetk)
-library(lightgbm) #
+library(lightgbm) # lgbm
 library(bonsai) # lgbm
+
+# adds lags 1, 3, 7, 14, 28 and 56
+lag_transformer <- function(data){
+  data  |> 
+    tk_augment_lags(orders, .lags = c(1, 3, 7, 14, 28))
+}
 
 xgb_process <- function(warehouse_name, df, rohlik_test) {
   warehouse_df <- df |> 
-    filter(warehouse == warehouse_name)
+    filter(warehouse == warehouse_name) |> 
+    lag_transformer()
   
   warehouse_test <- rohlik_test |> 
     filter(warehouse == warehouse_name)
   
-  splits <- warehouse_df |> 
+ splits <- warehouse_df |> 
     time_series_split(
       assess     = "2 months", 
       cumulative = TRUE
