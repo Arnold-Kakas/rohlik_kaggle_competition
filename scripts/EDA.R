@@ -39,24 +39,6 @@ summarize(rohlik_test,
           min_date = min(date),
           max_date = max(date))
 
-expanded_data <- full_time_series %>%
-  left_join(rohlik_all, by = c("warehouse", "date"))
-
-# Replace NA values with 0 for numeric/integer columns and NA for character columns
-expanded_data <- expanded_data %>%
-  mutate(across(where(is.numeric), ~replace_na(., 0))) %>%
-  mutate(across(where(is.character), ~replace_na(., NA_character_))) |> 
-  arrange(warehouse, date) |>  # Ensure data is sorted by warehouse and date
-  group_by(warehouse) |> 
-  mutate(
-    orders_lag_1d = lag(orders, 1),
-    orders_lag_3d = lag(orders, 3),
-    orders_lag_7d = lag(orders, 7),
-    orders_lag_14d = lag(orders, 14),
-    orders_lag_28d = lag(orders, 28)
-  ) |> 
-  ungroup()
-
 rohlik_all |>
   filter(warehouse == "Frankfurt_1",
          date <= ymd("2024-03-15")) |> 
@@ -68,44 +50,22 @@ rohlik_all |>
     .interactive = FALSE
   )
 
-expanded_data |>
-  filter(warehouse == "Prague_1",
-         date <= ymd("2024-03-15")) |> 
-  select(date, orders) |> 
-  plot_seasonal_diagnostics(
-    .date_var = date,
-    .value = orders,
-    .interactive = FALSE,
-    .geom_color = "steelblue"
-)
-
-expanded_data |>
-  filter(warehouse == "Prague_1",
-         date <= ymd("2024-03-15")) |> 
-  tk_augment_timeseries_signature() |> 
-  colnames()
-
-# we will remove  "hour", "minute", "second", "hour12", "am.pm", "index.num" in recipe
-
-
 # anomaly detection
 
 rohlik_all |> 
-  filter(warehouse == "Prague_3",
+  filter(warehouse == "Frankfurt_1",
          date >= ymd("2022-02-01"),
          date <= ymd("2024-03-15")) |> 
-  timetk::anomalize(.date_var = date,
+  anomalize(.date_var = date,
                     .value = orders,
-                    .iqr_alpha = 0.10,
+                    .iqr_alpha = 0.15,
                     .max_anomalies = 0.2) |>
-  timetk::plot_anomalies(.date_var = date, .interactive = FALSE) +
+  plot_anomalies(.date_var = date, .interactive = FALSE) +
   theme_minimal() +
   labs(title = NULL) +
   theme(legend.position = "none")
 
-# spravit cleaning pre munich a frankfurt zlvast len pre ich periody, odstanit test casovy rad a skratit zaciatok podla first order
-
-expanded_data_cleaned_munich <- rohlik_all |> 
+data_cleaned_munich <- rohlik_all |> 
   filter(warehouse == "Munich_1",
          date >= ymd("2021-07-21"),
          date <= ymd("2024-03-15")) |> 
@@ -121,7 +81,7 @@ expanded_data_cleaned_munich <- rohlik_all |>
          orders = observed_clean) |> 
   mutate(orders = round(orders, 0))
 
-expanded_data_cleaned_frankfurt <- rohlik_all |> 
+data_cleaned_frankfurt <- rohlik_all |> 
   filter(warehouse == "Frankfurt_1",
          date >= ymd("2022-02-18"),
          date <= ymd("2024-03-15")) |> 
@@ -137,7 +97,7 @@ expanded_data_cleaned_frankfurt <- rohlik_all |>
          orders = observed_clean) |> 
   mutate(orders = round(orders, 0))
 
-expanded_data_cleaned_rest <- rohlik_all |> 
+data_cleaned_rest <- rohlik_all |> 
   filter(warehouse %in% c("Prague_1", "Prague_2", "Prague_3", "Budapest_1", "Brno_1"),
          date <= ymd("2024-03-15")) |> 
   group_by(warehouse) |> 
@@ -152,13 +112,30 @@ expanded_data_cleaned_rest <- rohlik_all |>
          orders = observed_clean) |> 
   mutate(orders = round(orders, 0))
 
-expanded_data_cleaned <- bind_rows(
-  expanded_data_cleaned_frankfurt,
-  expanded_data_cleaned_munich,
-  expanded_data_cleaned_rest
+data_cleaned <- bind_rows(
+  data_cleaned_frankfurt,
+  data_cleaned_munich,
+  data_cleaned_rest
 )
 
-expanded_data_cleaned <- expanded_data_cleaned |> 
+expanded_data <- full_time_series %>%
+  left_join(data_cleaned, by = c("warehouse", "date"))
+
+# Replace NA values with 0 for numeric/integer columns and NA for character columns
+expanded_data <- expanded_data |> 
+  mutate(across(where(is.character), ~replace_na(., NA_character_))) |> 
+  arrange(warehouse, date) |>  # Ensure data is sorted by warehouse and date
+  group_by(warehouse) |> 
+  mutate(
+    orders_lag_1d = lag(orders, 1),
+    orders_lag_3d = lag(orders, 3),
+    orders_lag_7d = lag(orders, 7),
+    orders_lag_14d = lag(orders, 14),
+    orders_lag_28d = lag(orders, 28)
+  ) |> 
+  ungroup()
+
+expanded_data <- expanded_data |> 
   left_join(rohlik_all |> 
               select(warehouse,
                      date,
@@ -171,7 +148,7 @@ expanded_data_cleaned <- expanded_data_cleaned |>
             keep = FALSE)
 
 
-expanded_data_cleaned |>
+expanded_data |>
   filter(warehouse == "Frankfurt_1",
          date <= ymd("2024-03-15")) |> 
   select(date, orders) |> 
@@ -182,5 +159,4 @@ expanded_data_cleaned |>
     .interactive = FALSE
   )
 
-write_rds(expanded_data, "data/full_data.RDS")
-write_rds(expanded_data_cleaned, "data/full_data_cleaned.RDS")
+write_rds(expanded_data, "data/full_data_cleaned.RDS")
