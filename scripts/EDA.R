@@ -34,7 +34,7 @@ rohlik_all <- bind_rows(
 ) |> 
   select(-id)
 
-summarize(rohlik_test,
+summarize(rohlik_train,
           .by = warehouse,
           min_date = min(date),
           max_date = max(date))
@@ -73,7 +73,6 @@ data_cleaned_munich <- rohlik_all |>
   anomalize(
     .date_var      = date, 
     .value         = orders,
-    .iqr_alpha     = 0.15,
     .message       = FALSE
   ) |> 
   select(warehouse,
@@ -119,7 +118,7 @@ data_cleaned <- bind_rows(
 )
 
 expanded_data <- full_time_series %>%
-  left_join(data_cleaned, by = c("warehouse", "date"))
+  left_join(rohlik_all, by = c("warehouse", "date"))
 
 # Replace NA values with 0 for numeric/integer columns and NA for character columns
 expanded_data <- expanded_data |> 
@@ -159,4 +158,4 @@ expanded_data |>
     .interactive = FALSE
   )
 
-write_rds(expanded_data, "data/full_data_cleaned.RDS")
+write_rds(expanded_data, "data/expanded_data.RDS")
