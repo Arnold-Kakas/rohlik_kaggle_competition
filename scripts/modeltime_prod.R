@@ -53,6 +53,9 @@ xgb_process <- function(warehouse_name, df, rohlik_test) {
       cumulative = TRUE
     )
   
+  xgb_params <- read_rds("data/best_model_params_xgb.RDS")
+  lgbm_params <- read_rds("data/best_model_params.RDS")
+  
   rec_obj <- recipe(orders ~ ., training(splits)) |> 
     step_mutate_at(warehouse, fn = droplevels) |> 
     step_timeseries_signature(date) |> 
@@ -60,11 +63,12 @@ xgb_process <- function(warehouse_name, df, rohlik_test) {
             contains("second"), contains("xts"), date) |> 
     step_novel() |> 
     step_zv(all_predictors()) |> 
-    step_dummy(all_nominal_predictors(), one_hot = TRUE)
+    step_dummy(all_nominal_predictors(), one_hot = FALSE)
   
   xgb_model <- boost_tree() |> 
     set_engine("xgboost") |> 
-    set_mode("regression")
+    set_mode("regression") %>%
+    finalize_model(., xgb_params)
   
   workflow_xgb <- workflow() |> 
     add_model(xgb_model) |> 
@@ -118,7 +122,8 @@ lgbm_process <- function(warehouse_name, df, rohlik_test) {
   
   xgb_model <- boost_tree() |> 
     set_engine("lightgbm") |> 
-    set_mode("regression")
+    set_mode("regression") %>%
+    finalize_model(., lgbm_params)
   
   workflow_xgb <- workflow() |> 
     add_model(xgb_model) |> 

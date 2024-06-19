@@ -3,6 +3,10 @@ library(timetk)
 library(lubridate)
 library(ggplot2)
 
+# to do:
+# mean precipitation a snow po mesiacoch
+# forecast user_activity 1 a 2
+
 calendar_test <- read_csv("data/test_calendar.csv")
 calendar_train <- read_csv("data/train_calendar.csv")
 
@@ -40,13 +44,29 @@ summarize(rohlik_train,
           max_date = max(date))
 
 rohlik_all |>
-  filter(warehouse == "Frankfurt_1",
+  filter(warehouse == "Budapest_1",
          date <= ymd("2024-03-15")) |> 
-  select(date, orders) |> 
+  mutate(month = ymd(paste0(year(date),"-",month(date),"-01")),
+         day = wday(date))|> 
+  select(date, user_activity_2, month, day) |> 
+  summarize(.by = c(day, month),
+            value = mean(user_activity_2)) #|> 
   plot_time_series(
-    .date_var = date,
-    .value = orders,
+    .date_var = month,
+    .color_var = day,
+    .value = value,
     .smooth = FALSE,
+    .interactive = FALSE
+  )
+    
+
+  rohlik_all |>
+  filter(warehouse == "Brno_1",
+         date <= ymd("2024-03-15")) |> 
+  select(date, snow) |> 
+  plot_seasonal_diagnostics(
+    .date_var = date,
+    .value = snow,
     .interactive = FALSE
   )
 
