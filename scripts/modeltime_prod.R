@@ -73,7 +73,7 @@ xgb_process <- function(warehouse_name, df, rohlik_test) {
   workflow_xgb <- workflow() |> 
     add_model(xgb_model) |> 
     add_recipe(rec_obj) |> 
-    fit(training(splits))
+    fit(training(splits)) # je toto treba ked je model finalized???
   
   model_tbl <- modeltime_table(
     workflow_xgb

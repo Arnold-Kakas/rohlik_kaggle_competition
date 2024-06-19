@@ -1,7 +1,9 @@
-library(tidyverse)
 library(timetk)
-library(lubridate)
 library(ggplot2)
+library(lubridate)
+library(tidyverse)
+library(tidymodels)
+library(modeltime)
 
 # to do:
 # mean precipitation a snow po mesiacoch
@@ -30,152 +32,319 @@ summarize(calendar_train,
           max_date = max(date))
 
 rohlik_test <- read_csv("data/test.csv")
-rohlik_train <- read_csv("data/train.csv")
-
-rohlik_all <- bind_rows(
-  rohlik_train,
-  rohlik_test
-) |> 
+rohlik_train <- read_csv("data/train.csv") |> 
+  mutate(across(where(is.character), ~ replace_na(., "No"))) |> 
   select(-id)
 
-summarize(rohlik_train,
-          .by = warehouse,
-          min_date = min(date),
-          max_date = max(date))
+# rohlik_all <- bind_rows(
+#   rohlik_train,
+#   rohlik_test
+# ) |> 
+#   select(-id)
 
-rohlik_all |>
-  filter(warehouse == "Budapest_1",
-         date <= ymd("2024-03-15")) |> 
-  mutate(month = ymd(paste0(year(date),"-",month(date),"-01")),
-         day = wday(date))|> 
-  select(date, user_activity_2, month, day) |> 
-  summarize(.by = c(day, month),
-            value = mean(user_activity_2)) #|> 
-  plot_time_series(
-    .date_var = month,
-    .color_var = day,
-    .value = value,
-    .smooth = FALSE,
-    .interactive = FALSE
+precip_snow <- rohlik_train |> 
+  mutate(month_number = as.character(month(date))) |> 
+  summarize(.by = c(warehouse, 
+                    month_number),
+            snow = round(mean(snow, na.rm = TRUE),2),
+            precipitation = round(mean(precipitation, na.rm = TRUE),2))
+
+rohlik_test_adj <-  rohlik_test |> 
+  mutate(month_number = as.character(month(date))) |> 
+  left_join(precip_snow, 
+            join_by(warehouse == warehouse, 
+                      month_number == month_number), 
+            keep = FALSE) |> 
+  mutate(across(where(is.character), ~ replace_na(., "No"))) |> 
+  select(-id)
+
+missing_cols <- setdiff(names(rohlik_train), names(rohlik_test_adj))
+
+rohlik_test_adj[missing_cols] <- 0
+
+
+# xgb ua 1 function ----
+xgb_user_activity_1 <- function(warehouse_name, train_df, test_df) {
+  warehouse_df <- train_df |>
+    filter(warehouse == !!warehouse_name)
+
+  warehouse_test <- test_df |>
+    filter(warehouse == !!warehouse_name)
+  
+  # warehouse_df <- rohlik_train |> 
+  #   filter(warehouse == "Brno_1")
+  # 
+  # warehouse_test <- rohlik_test_adj |> 
+  #   filter(warehouse == "Brno_1")
+  
+  splits <- warehouse_df |> 
+    time_series_split(
+      date_var = date,
+      assess     = "2 months", 
+      cumulative = TRUE
+    )
+  
+  rec_obj <- recipe(user_activity_1 ~ ., training(splits)) |> 
+    #step_mutate_at(warehouse, fn = droplevels) |> 
+    step_timeseries_signature(date) |> 
+    step_rm(contains("am.pm"), contains("hour"), contains("minute"),
+            contains("second"), contains("xts"), date, orders, user_activity_2) |> 
+    step_novel() |> 
+    step_zv(all_predictors()) |> 
+    step_dummy(all_nominal_predictors(), one_hot = FALSE)
+  
+  xgb_model <- boost_tree() |> 
+    set_engine("xgboost") |> 
+    set_mode("regression")
+  
+  workflow_xgb <- workflow() |> 
+    add_model(xgb_model) |> 
+    add_recipe(rec_obj) |> 
+    fit(training(splits))
+  
+  model_tbl <- modeltime_table(
+    workflow_xgb
   )
-    
+  
+  model_tbl
+  
+  calib_tbl <- model_tbl |> 
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "warehouse",
+      quiet = FALSE
+    )
+  
+  refit_tbl <- calib_tbl |> 
+    modeltime_refit(data = warehouse_df)
+  
+  forecast <- refit_tbl |> 
+    modeltime_forecast(
+      new_data    = warehouse_test,
+      actual_data = warehouse_df, 
+      conf_by_id  = TRUE
+    )
+  
+  refit_tbl |> 
+    modeltime_forecast(
+      new_data    = warehouse_test,
+      actual_data = warehouse_df, 
+      conf_by_id  = TRUE
+    ) |> 
+    group_by(warehouse) |> 
+    plot_modeltime_forecast(
+      .facet_ncol  = 1,
+      .interactive = FALSE
+    ) |> 
+    print()
+  
+  return(forecast)
+}
 
-  rohlik_all |>
-  filter(warehouse == "Brno_1",
-         date <= ymd("2024-03-15")) |> 
-  select(date, snow) |> 
-  plot_seasonal_diagnostics(
-    .date_var = date,
-    .value = snow,
-    .interactive = FALSE
+xgb_ua1_Brno_1 <- xgb_user_activity_1("Brno_1", rohlik_train, rohlik_test_adj |> select(-user_activity_1)) |> 
+  filter(.index > ymd("2024-03-15")) |> 
+  select(.value, warehouse, .index) |> 
+  mutate(.value = round(.value,0)) |> 
+  rename(date = .index) |> 
+  rename(user_activity_1 = .value)
+
+xgb_ua1_Prague_1 <- xgb_user_activity_1("Prague_1", rohlik_train, rohlik_test_adj |> select(-user_activity_1)) |> 
+  filter(.index > ymd("2024-03-15")) |> 
+  select(.value, warehouse, .index) |>  
+  mutate(.value = round(.value,0)) |> 
+  rename(date = .index) |> 
+  rename(user_activity_1 = .value)
+
+xgb_ua1_Prague_2 <- xgb_user_activity_1("Prague_2", rohlik_train, rohlik_test_adj |> select(-user_activity_1)) |> 
+  filter(.index > ymd("2024-03-15")) |> 
+  select(.value, warehouse, .index) |>  
+  mutate(.value = round(.value,0)) |> 
+  rename(date = .index) |> 
+  rename(user_activity_1 = .value)
+
+xgb_ua1_Prague_3 <- xgb_user_activity_1("Prague_3", rohlik_train, rohlik_test_adj |> select(-user_activity_1)) |> 
+  filter(.index > ymd("2024-03-15")) |> 
+  select(.value, warehouse, .index) |>  
+  mutate(.value = round(.value,0)) |> 
+  rename(date = .index) |> 
+  rename(user_activity_1 = .value)
+
+xgb_ua1_Budapest_1 <- xgb_user_activity_1("Budapest_1", rohlik_train, rohlik_test_adj |> select(-user_activity_1)) |> 
+  filter(.index > ymd("2024-03-15")) |> 
+  select(.value, warehouse, .index) |>  
+  mutate(.value = round(.value,0)) |> 
+  rename(date = .index) |> 
+  rename(user_activity_1 = .value)
+
+xgb_ua1_Munich_1 <- xgb_user_activity_1("Munich_1", rohlik_train, rohlik_test_adj |> select(-user_activity_1)) |> 
+  filter(.index > ymd("2024-03-15")) |> 
+  select(.value, warehouse, .index) |>  
+  mutate(.value = round(.value,0)) |> 
+  rename(date = .index) |> 
+  rename(user_activity_1 = .value)
+
+xgb_ua1_Frankfurt_1 <- xgb_user_activity_1("Frankfurt_1", rohlik_train, rohlik_test_adj |> select(-user_activity_1)) |> 
+  filter(.index > ymd("2024-03-15")) |> 
+  select(.value, warehouse, .index) |>  
+  mutate(.value = round(.value,0)) |> 
+  rename(date = .index) |> 
+  rename(user_activity_1 = .value)
+
+xgb_ua1_pred <- 
+  bind_rows(
+    xgb_ua1_Brno_1,
+    xgb_ua1_Munich_1,
+    xgb_ua1_Frankfurt_1,
+    xgb_ua1_Budapest_1,
+    xgb_ua1_Prague_1,
+    xgb_ua1_Prague_2,
+    xgb_ua1_Prague_3
   )
 
-# anomaly detection
-
-rohlik_all |> 
-  filter(warehouse == "Frankfurt_1",
-         date >= ymd("2022-02-01"),
-         date <= ymd("2024-03-15")) |> 
-  anomalize(.date_var = date,
-                    .value = orders,
-                    .iqr_alpha = 0.15,
-                    .max_anomalies = 0.2) |>
-  plot_anomalies(.date_var = date, .interactive = FALSE) +
-  theme_minimal() +
-  labs(title = NULL) +
-  theme(legend.position = "none")
-
-data_cleaned_munich <- rohlik_all |> 
-  filter(warehouse == "Munich_1",
-         date >= ymd("2021-07-21"),
-         date <= ymd("2024-03-15")) |> 
-  group_by(warehouse) |> 
-  anomalize(
-    .date_var      = date, 
-    .value         = orders,
-    .message       = FALSE
-  ) |> 
-  select(warehouse,
-         date,
-         orders = observed_clean) |> 
-  mutate(orders = round(orders, 0))
-
-data_cleaned_frankfurt <- rohlik_all |> 
-  filter(warehouse == "Frankfurt_1",
-         date >= ymd("2022-02-18"),
-         date <= ymd("2024-03-15")) |> 
-  group_by(warehouse) |> 
-  anomalize(
-    .date_var      = date, 
-    .value         = orders,
-    .iqr_alpha     = 0.15,
-    .message       = FALSE
-  ) |> 
-  select(warehouse,
-         date,
-         orders = observed_clean) |> 
-  mutate(orders = round(orders, 0))
-
-data_cleaned_rest <- rohlik_all |> 
-  filter(warehouse %in% c("Prague_1", "Prague_2", "Prague_3", "Budapest_1", "Brno_1"),
-         date <= ymd("2024-03-15")) |> 
-  group_by(warehouse) |> 
-  anomalize(
-    .date_var      = date, 
-    .value         = orders,
-    .iqr_alpha     = 0.15,
-    .message       = FALSE
-  ) |> 
-  select(warehouse,
-         date,
-         orders = observed_clean) |> 
-  mutate(orders = round(orders, 0))
-
-data_cleaned <- bind_rows(
-  data_cleaned_frankfurt,
-  data_cleaned_munich,
-  data_cleaned_rest
-)
-
-expanded_data <- full_time_series %>%
-  left_join(rohlik_all, by = c("warehouse", "date"))
-
-# Replace NA values with 0 for numeric/integer columns and NA for character columns
-expanded_data <- expanded_data |> 
-  mutate(across(where(is.character), ~replace_na(., NA_character_))) |> 
-  arrange(warehouse, date) |>  # Ensure data is sorted by warehouse and date
-  group_by(warehouse) |> 
-  mutate(
-    orders_lag_1d = lag(orders, 1),
-    orders_lag_3d = lag(orders, 3),
-    orders_lag_7d = lag(orders, 7),
-    orders_lag_14d = lag(orders, 14),
-    orders_lag_28d = lag(orders, 28)
-  ) |> 
-  ungroup()
-
-expanded_data <- expanded_data |> 
-  left_join(rohlik_all |> 
-              select(warehouse,
-                     date,
-                     holiday_name,
-                     holiday,
-                     shops_closed,
-                     winter_school_holidays,
-                     school_holidays),
-            join_by(warehouse == warehouse, date == date),
-            keep = FALSE)
-
-
-expanded_data |>
-  filter(warehouse == "Frankfurt_1",
-         date <= ymd("2024-03-15")) |> 
-  select(date, orders) |> 
-  plot_time_series(
-    .date_var = date,
-    .value = orders,
-    .smooth = FALSE,
-    .interactive = FALSE
+# xgb ua 1 function ----
+xgb_user_activity_2 <- function(warehouse_name, train_df, test_df) {
+  warehouse_df <- train_df |>
+    filter(warehouse == !!warehouse_name)
+  
+  warehouse_test <- test_df |>
+    filter(warehouse == !!warehouse_name)
+  
+  # warehouse_df <- rohlik_train |> 
+  #   filter(warehouse == "Brno_1")
+  # 
+  # warehouse_test <- rohlik_test_adj |> 
+  #   filter(warehouse == "Brno_1")
+  
+  splits <- warehouse_df |> 
+    time_series_split(
+      date_var = date,
+      assess     = "2 months", 
+      cumulative = TRUE
+    )
+  
+  rec_obj <- recipe(user_activity_2 ~ ., training(splits)) |> 
+    #step_mutate_at(warehouse, fn = droplevels) |> 
+    step_timeseries_signature(date) |> 
+    step_rm(contains("am.pm"), contains("hour"), contains("minute"),
+            contains("second"), contains("xts"), date, orders, user_activity_1) |> 
+    step_novel() |> 
+    step_zv(all_predictors()) |> 
+    step_dummy(all_nominal_predictors(), one_hot = FALSE)
+  
+  xgb_model <- boost_tree() |> 
+    set_engine("xgboost") |> 
+    set_mode("regression")
+  
+  workflow_xgb <- workflow() |> 
+    add_model(xgb_model) |> 
+    add_recipe(rec_obj) |> 
+    fit(training(splits))
+  
+  model_tbl <- modeltime_table(
+    workflow_xgb
   )
+  
+  model_tbl
+  
+  calib_tbl <- model_tbl |> 
+    modeltime_calibrate(
+      new_data = testing(splits), 
+      id       = "warehouse",
+      quiet = FALSE
+    )
+  
+  refit_tbl <- calib_tbl |> 
+    modeltime_refit(data = warehouse_df)
+  
+  forecast <- refit_tbl |> 
+    modeltime_forecast(
+      new_data    = warehouse_test,
+      actual_data = warehouse_df, 
+      conf_by_id  = TRUE
+    )
+  
+  refit_tbl |> 
+    modeltime_forecast(
+      new_data    = warehouse_test,
+      actual_data = warehouse_df, 
+      conf_by_id  = TRUE
+    ) |> 
+    group_by(warehouse) |> 
+    plot_modeltime_forecast(
+      .facet_ncol  = 1,
+      .interactive = FALSE
+    ) |> 
+    print()
+  
+  return(forecast)
+}
+
+xgb_ua2_Brno_1 <- xgb_user_activity_2("Brno_1", rohlik_train, rohlik_test_adj |> select(-user_activity_2)) |> 
+  filter(.index > ymd("2024-03-15")) |> 
+  select(.value, warehouse, .index) |> 
+  mutate(.value = round(.value,0)) |> 
+  rename(date = .index) |> 
+  rename(user_activity_2 = .value)
+
+xgb_ua2_Prague_1 <- xgb_user_activity_2("Prague_1", rohlik_train, rohlik_test_adj |> select(-user_activity_2)) |> 
+  filter(.index > ymd("2024-03-15")) |> 
+  select(.value, warehouse, .index) |>  
+  mutate(.value = round(.value,0)) |> 
+  rename(date = .index) |> 
+  rename(user_activity_2 = .value)
+
+xgb_ua2_Prague_2 <- xgb_user_activity_2("Prague_2", rohlik_train, rohlik_test_adj |> select(-user_activity_2)) |> 
+  filter(.index > ymd("2024-03-15")) |> 
+  select(.value, warehouse, .index) |>  
+  mutate(.value = round(.value,0)) |> 
+  rename(date = .index) |> 
+  rename(user_activity_2 = .value)
+
+xgb_ua2_Prague_3 <- xgb_user_activity_2("Prague_3", rohlik_train, rohlik_test_adj |> select(-user_activity_2)) |> 
+  filter(.index > ymd("2024-03-15")) |> 
+  select(.value, warehouse, .index) |>  
+  mutate(.value = round(.value,0)) |> 
+  rename(date = .index) |> 
+  rename(user_activity_2 = .value)
+
+xgb_ua2_Budapest_1 <- xgb_user_activity_2("Budapest_1", rohlik_train, rohlik_test_adj |> select(-user_activity_2)) |> 
+  filter(.index > ymd("2024-03-15")) |> 
+  select(.value, warehouse, .index) |>  
+  mutate(.value = round(.value,0)) |> 
+  rename(date = .index) |> 
+  rename(user_activity_2 = .value)
+
+xgb_ua2_Munich_1 <- xgb_user_activity_2("Munich_1", rohlik_train, rohlik_test_adj |> select(-user_activity_2)) |> 
+  filter(.index > ymd("2024-03-15")) |> 
+  select(.value, warehouse, .index) |>  
+  mutate(.value = round(.value,0)) |> 
+  rename(date = .index) |> 
+  rename(user_activity_2 = .value)
+
+xgb_ua2_Frankfurt_1 <- xgb_user_activity_2("Frankfurt_1", rohlik_train, rohlik_test_adj |> select(-user_activity_2)) |> 
+  filter(.index > ymd("2024-03-15")) |> 
+  select(.value, warehouse, .index) |>  
+  mutate(.value = round(.value,0)) |> 
+  rename(date = .index) |> 
+  rename(user_activity_2 = .value)
+
+xgb_ua2_pred <- 
+  bind_rows(
+    xgb_ua2_Brno_1,
+    xgb_ua2_Munich_1,
+    xgb_ua2_Frankfurt_1,
+    xgb_ua2_Budapest_1,
+    xgb_ua2_Prague_1,
+    xgb_ua2_Prague_2,
+    xgb_ua2_Prague_3
+  )
+
+rohlik_test_adj <- rohlik_test_adj |> 
+  select(-user_activity_1, -user_activity_2, -orders, -month_number) |> 
+  left_join(xgb_ua1_pred, join_by(warehouse == warehouse, date == date), keep = FALSE) |> 
+  left_join(xgb_ua2_pred, join_by(warehouse == warehouse, date == date), keep = FALSE)
+
+expanded_data <- bind_rows(rohlik_test_adj,
+                           rohlik_train)
 
 write_rds(expanded_data, "data/expanded_data.RDS")
