@@ -64,74 +64,16 @@ df <- read_rds("data/expanded_data.RDS") |>
                                     0)),
          day_before_holiday = ifelse(holiday == 0 & lead(holiday, 1), 1, 0),
          day_after_holiday = ifelse(holiday == 0 & lag(holiday, 1), 1, 0)) |> 
-  ungroup() |> 
-  filter(date < ymd("2024-03-16"))
+  ungroup()
 
-rohlik_test <- read_csv("data/test.csv") |> 
-  mutate(across(where(is.character), ~ replace_na(., "No"))) |> 
-  select(-id) |> 
-  tk_augment_timeseries_signature(.date_var = date) |> 
-  select(-c(index.num,
-            diff,
-            year.iso,
-            half,
-            month.xts,
-            month.lbl,
-            hour,
-            minute,
-            second,
-            hour12,
-            am.pm,
-            wday.xts,
-            wday.lbl,
-            week.iso,
-            week2,
-            week3,
-            week4,
-            mday7)) |> 
-  group_by(warehouse) |> 
-  arrange(warehouse, date) |> 
-  mutate(bridge_day = ifelse(holiday == 0 & wday == 2 & lead(holiday, 1) == 1,
-                             1,
-                             ifelse(holiday == 0 & wday == 6 & lag(holiday, 1) == 1,
-                                    1,
-                                    0)),
-         day_before_holiday = ifelse(holiday == 0 & lead(holiday, 1), 1, 0),
-         day_after_holiday = ifelse(holiday == 0 & lag(holiday, 1), 1, 0)) |> 
-  ungroup() |> 
-  mutate(day_before_holiday = coalesce(day_before_holiday,0),
-         day_after_holiday = coalesce(day_after_holiday,0))
-
-# Identify missing columns
-missing_cols <- setdiff(names(df), names(rohlik_test))
-
-# Add missing columns to dfB with value 0
-rohlik_test[missing_cols] <- 0
-
-rohlik_test <- rohlik_test |> 
+rohlik_test <- df |> 
+  filter(date >= ymd("2024-03-16")) |> 
   select(-orders)
 
+rohlik_train <- df |> 
+  filter(date < ymd("2024-03-16"))
 
-df_extended <- bind_rows(df, rohlik_test)
-# create training and testing datasets
-# df_w_features <- df |> 
-#   drop_na()
-# 
-# test_rohlik <- df |> 
-#   filter(date > ymd("2024-03-15"))
-
-df_rolling <- df_extended |> 
-  arrange(warehouse, date) #|> 
-#lag_roll_transformer()
-
-train_data <- df_rolling |> 
-  drop_na()
-
-
-future_data <- df_rolling %>%
-  filter(is.na(orders))
-
-splits <- train_data |> 
+splits <- rohlik_train |> 
   time_series_split(
     date_var = date,
     assess = 60,
@@ -141,9 +83,17 @@ splits <- train_data |>
 # workflow preparation ----
 # cross-validation folds
 set.seed(123)
-folds <- vfold_cv(training(splits),
-                  strata = warehouse,
-                  v = 6)
+# folds <- vfold_cv(training(splits),
+#                   strata = warehouse,
+#                   v = 6)
+
+folds <- time_series_cv(
+  data        =  training(splits),
+  assess      = "2 months",
+  initial     = "16 months",
+  skip        = "2 months",
+  slice_limit = 4
+)
 
 # recipe
 rec_obj <- recipe(orders ~ ., training(splits), skip = TRUE) |> 
@@ -151,8 +101,10 @@ rec_obj <- recipe(orders ~ ., training(splits), skip = TRUE) |>
   #step_naomit(contains("lag"), skip = TRUE) |> 
   step_novel() |> 
   step_zv(all_predictors()) |> 
+  step_center(all_numeric_predictors()) |> 
+  step_scale(all_numeric_predictors()) |> 
   #step_normalize(contains("lag")) |> 
-  step_dummy(all_nominal_predictors(), one_hot = TRUE)
+  step_dummy(all_nominal_predictors(), one_hot = FALSE)
 
 # model
 xgb_model <- boost_tree(
@@ -286,7 +238,7 @@ recursive_forecast <- function(model, initial_data, to_forecast, warehouse, tran
 }
 
 # List of unique warehouses
-warehouses <- unique(future_data$warehouse)
+warehouses <- unique(rohlik_test$warehouse)
 
 # Run the recursive forecast for each warehouse
 # all_predictions <- lapply(warehouses, function(wh) {
@@ -296,8 +248,8 @@ warehouses <- unique(future_data$warehouse)
 # Combine all predictions into a single dataframe
 #final_predictions <- bind_rows(all_predictions)
 
-forecast <-  predict(finalized_workflow, future_data) |>
-  bind_cols(future_data |> select(warehouse, date)) |> 
+forecast <-  predict(finalized_workflow, rohlik_test) |>
+  bind_cols(rohlik_test |> select(warehouse, date)) |> 
   rename(orders = .pred) |>
   mutate(id = paste0(warehouse, "_", as.character(date)),
          orders = round(orders, 0)) |> 

@@ -4,6 +4,8 @@ library(lubridate)
 library(tidyverse)
 library(tidymodels)
 library(modeltime)
+library(lightgbm) # lgbm
+library(bonsai) # lgbm
 
 # to do:
 # mean precipitation a snow po mesiacoch
@@ -66,6 +68,7 @@ rohlik_test_adj[missing_cols] <- 0
 # xgb ua 1 function ----
 xgb_user_activity_1 <- function(warehouse_name, train_df, test_df) {
   warehouse_df <- train_df |>
+    select(-orders) |> 
     filter(warehouse == !!warehouse_name)
 
   warehouse_test <- test_df |>
@@ -88,13 +91,15 @@ xgb_user_activity_1 <- function(warehouse_name, train_df, test_df) {
     #step_mutate_at(warehouse, fn = droplevels) |> 
     step_timeseries_signature(date) |> 
     step_rm(contains("am.pm"), contains("hour"), contains("minute"),
-            contains("second"), contains("xts"), date, orders, user_activity_2) |> 
+            contains("second"), contains("xts"), date, user_activity_2) |> 
     step_novel() |> 
+    step_center(all_numeric_predictors()) |> 
+    step_scale(all_numeric_predictors()) |> 
     step_zv(all_predictors()) |> 
     step_dummy(all_nominal_predictors(), one_hot = FALSE)
   
   xgb_model <- boost_tree() |> 
-    set_engine("xgboost") |> 
+    set_engine("lightgbm") |> 
     set_mode("regression")
   
   workflow_xgb <- workflow() |> 
@@ -204,6 +209,7 @@ xgb_ua1_pred <-
 # xgb ua 1 function ----
 xgb_user_activity_2 <- function(warehouse_name, train_df, test_df) {
   warehouse_df <- train_df |>
+    select(-orders) |> 
     filter(warehouse == !!warehouse_name)
   
   warehouse_test <- test_df |>
@@ -226,13 +232,15 @@ xgb_user_activity_2 <- function(warehouse_name, train_df, test_df) {
     #step_mutate_at(warehouse, fn = droplevels) |> 
     step_timeseries_signature(date) |> 
     step_rm(contains("am.pm"), contains("hour"), contains("minute"),
-            contains("second"), contains("xts"), date, orders, user_activity_1) |> 
+            contains("second"), contains("xts"), date, user_activity_1) |> 
     step_novel() |> 
     step_zv(all_predictors()) |> 
+    step_center(all_numeric_predictors()) |> 
+    step_scale(all_numeric_predictors()) |> 
     step_dummy(all_nominal_predictors(), one_hot = FALSE)
   
   xgb_model <- boost_tree() |> 
-    set_engine("xgboost") |> 
+    set_engine("lightgbm") |> 
     set_mode("regression")
   
   workflow_xgb <- workflow() |> 
@@ -348,3 +356,8 @@ expanded_data <- bind_rows(rohlik_test_adj,
                            rohlik_train)
 
 write_rds(expanded_data, "data/expanded_data.RDS")
+
+
+cor(expanded_data |> 
+      filter(date < ymd("2024-03-15"))|> 
+      select(where(is.numeric)), method = c("pearson"))
